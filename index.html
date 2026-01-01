@@ -138,9 +138,17 @@
 
     /************* QR 顯示 *************/
     function renderQR(text) {
-      qrContainer.innerHTML = "";
-      new QRCode(qrContainer, { text, width: 220, height: 220 });
-    }
+  try {
+    if (!qrContainer) throw new Error("找不到 #qrcode 容器（HTML id 不存在）");
+    if (!window.QRCode) throw new Error("QRCode 套件未載入（qrcode.min.js 讀不到）");
+    qrContainer.innerHTML = "";
+    new QRCode(qrContainer, { text, width: 220, height: 220 });
+  } catch (e) {
+    console.error(e);
+    setStatus("無法產生 QR：" + (e.message || e.toString()));
+  }
+}
+
 
     function startCountdown() {
       let remain = QR_INTERVAL_SEC;
