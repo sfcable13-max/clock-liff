@@ -42,6 +42,18 @@
     <button class="primary" id="bindBtn">綁定</button>
     <div class="muted" id="bindHint"></div>
   </div>
+  <div class="card hidden" id="qrCard">
+  <div><b>請出示 QR 給公司裝置掃描</b></div>
+  <div class="muted" id="qrHint">QR 每 5 秒更新一次（截圖無效）</div>
+
+  <div style="margin-top:12px; display:flex; justify-content:center;">
+    <div id="qrcode"></div>
+  </div>
+
+  <div class="muted" style="margin-top:10px;">
+    重新更新倒數：<span id="countdown">5</span> 秒
+  </div>
+</div>
 
   <div class="card hidden" id="actionsCard">
     <div><b>功能</b></div>
@@ -52,7 +64,7 @@
     <button class="danger" onclick="liffClose()">關閉</button>
     <p class="muted">＊目前為畫面測試版，尚未連接實際打卡資料。</p>
   </div>
-
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <script>
     const LIFF_ID = "2008804666-dd6swDW3";
@@ -61,6 +73,53 @@
     const profileCard = document.getElementById("profileCard");
     const bindCard = document.getElementById("bindCard");
     const actionsCard = document.getElementById("actionsCard");
+    const qrCard = document.getElementById("qrCard");
+const qrContainer = document.getElementById("qrcode");
+const countdownEl = document.getElementById("countdown");
+const qrHint = document.getElementById("qrHint");
+
+const QR_INTERVAL_SEC = 5;
+let countdownTimer = null;
+let refreshTimer = null;
+
+function renderQR(text) {
+  qrContainer.innerHTML = "";
+  new QRCode(qrContainer, {
+    text,
+    width: 220,
+    height: 220
+  });
+}
+
+function startCountdown() {
+  let remain = QR_INTERVAL_SEC;
+  countdownEl.textContent = remain;
+
+  if (countdownTimer) clearInterval(countdownTimer);
+  countdownTimer = setInterval(() => {
+    remain--;
+    if (remain <= 0) remain = QR_INTERVAL_SEC;
+    countdownEl.textContent = remain;
+  }, 1000);
+}
+
+function startDynamicQR(profile) {
+  show(qrCard);
+  qrHint.textContent = "QR 每 5 秒更新一次（截圖無效）";
+
+  function refresh() {
+    const ts = Math.floor(Date.now() / 1000 / QR_INTERVAL_SEC);
+    const token = `TEST|uid=${profile.userId}|ts=${ts}`;
+    renderQR(token);
+    setStatus("QR 已更新");
+  }
+
+  refresh();
+  startCountdown();
+
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = setInterval(refresh, QR_INTERVAL_SEC * 1000);
+}
 
     const avatarEl = document.getElementById("avatar");
     const displayNameEl = document.getElementById("displayName");
@@ -115,7 +174,8 @@
           show(bindCard);
         }else{
           setStatus(`已綁定員工編號：${isBound()}`);
-          show(actionsCard);
+          startDynamicQR(profile);
+
         }
       }catch(e){
         console.error(e);
