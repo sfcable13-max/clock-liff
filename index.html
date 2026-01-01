@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>公司打卡系統</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, "Noto Sans TC", sans-serif; margin: 20px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .row { display:flex; align-items:center; gap:12px; }
+    img { width: 48px; height: 48px; border-radius: 50%; }
+    button { width: 100%; padding: 14px; margin: 8px 0; border: 0; border-radius: 10px; font-size: 16px; }
+    .primary { background:#111; color:#fff; }
+    .secondary { background:#f2f2f2; color:#111; }
+    .danger { background:#ffe9e9; color:#a40000; }
+    .muted { color:#666; font-size: 13px; }
+    .hidden { display:none; }
+    input { width: 100%; padding: 12px; border-radius: 10px; border:1px solid #ccc; font-size: 16px; }
+  </style>
+</head>
+<body>
+  <h2>公司打卡系統</h2>
+
+  <div class="card" id="statusCard">
+    <div id="status" class="muted">初始化中…</div>
+  </div>
+
+  <div class="card hidden" id="profileCard">
+    <div class="row">
+      <img id="avatar" alt="avatar" />
+      <div>
+        <div><b id="displayName"></b></div>
+        <div class="muted" id="userId"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card hidden" id="bindCard">
+    <div><b>第一次使用：請綁定員工編號</b></div>
+    <p class="muted">僅需填一次，之後系統會自動辨識你的 LINE 身分。</p>
+    <input id="empId" placeholder="輸入員工編號，例如 0001" />
+    <button class="primary" id="bindBtn">綁定</button>
+    <div class="muted" id="bindHint"></div>
+  </div>
+
+  <div class="card hidden" id="actionsCard">
+    <div><b>功能</b></div>
+    <button class="primary" onclick="fakeAction('上班')">上班打卡</button>
+    <button class="primary" onclick="fakeAction('下班')">下班打卡</button>
+    <button class="secondary" onclick="fakeAction('外勤打卡')">外勤打卡</button>
+    <button class="secondary" onclick="fakeAction('請假申請')">請假申請</button>
+    <button class="danger" onclick="liffClose()">關閉</button>
+    <p class="muted">＊目前為畫面測試版，尚未連接實際打卡資料。</p>
+  </div>
+
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script>
+    const LIFF_ID = "請貼上你的LIFF_ID";
+
+    const statusEl = document.getElementById("status");
+    const profileCard = document.getElementById("profileCard");
+    const bindCard = document.getElementById("bindCard");
+    const actionsCard = document.getElementById("actionsCard");
+
+    const avatarEl = document.getElementById("avatar");
+    const displayNameEl = document.getElementById("displayName");
+    const userIdEl = document.getElementById("userId");
+
+    const empIdEl = document.getElementById("empId");
+    const bindBtn = document.getElementById("bindBtn");
+    const bindHint = document.getElementById("bindHint");
+
+    function show(el){ el.classList.remove("hidden"); }
+    function setStatus(msg){ statusEl.textContent = msg; }
+
+    function fakeAction(name){
+      alert(`${name}：頁面已完成（下一步會接真正打卡功能）`);
+    }
+    function liffClose(){
+      if (window.liff) liff.closeWindow();
+    }
+
+    function isBound(){
+      return localStorage.getItem("boundEmpId");
+    }
+
+    bindBtn.addEventListener("click", () => {
+      const v = (empIdEl.value || "").trim();
+      if(!v){ bindHint.textContent = "請輸入員工編號"; return; }
+      localStorage.setItem("boundEmpId", v);
+      bindHint.textContent = "綁定成功";
+      bindCard.classList.add("hidden");
+      show(actionsCard);
+    });
+
+    async function main(){
+      try{
+        setStatus("初始化 LIFF…");
+        await liff.init({ liffId: LIFF_ID });
+
+        if(!liff.isLoggedIn()){
+          setStatus("導向 LINE 登入…");
+          liff.login();
+          return;
+        }
+
+        const profile = await liff.getProfile();
+        avatarEl.src = profile.pictureUrl || "";
+        displayNameEl.textContent = profile.displayName || "";
+        userIdEl.textContent = `LINE userId: ${profile.userId}`;
+        show(profileCard);
+
+        if(!isBound()){
+          setStatus("請先綁定員工編號");
+          show(bindCard);
+        }else{
+          setStatus(`已綁定員工編號：${isBound()}`);
+          show(actionsCard);
+        }
+      }catch(e){
+        console.error(e);
+        setStatus("初始化失敗，請確認 LIFF ID 是否正確");
+      }
+    }
+    main();
+  </script>
+</body>
+</html>
+
