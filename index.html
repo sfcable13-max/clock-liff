@@ -12,7 +12,6 @@
     button { width: 100%; padding: 14px; margin: 8px 0; border: 0; border-radius: 10px; font-size: 16px; }
     .primary { background:#111; color:#fff; }
     .secondary { background:#f2f2f2; color:#111; }
-    .danger { background:#ffe9e9; color:#a40000; }
     .muted { color:#666; font-size: 13px; line-height:1.5; }
     .hidden { display:none; }
     input { width: 100%; padding: 12px; border-radius: 10px; border:1px solid #ccc; font-size: 16px; box-sizing:border-box; }
@@ -23,7 +22,7 @@
 <body>
   <h2>公司打卡系統</h2>
 
-  <div class="card" id="statusCard">
+  <div class="card">
     <div id="status" class="muted">初始化中…</div>
   </div>
 
@@ -64,23 +63,19 @@
     <button class="secondary" id="rebindBtn">更改員工編號</button>
   </div>
 
-  <!-- QR 產生器 + HMAC（用於與 Apps Script 相同簽章） -->
+  <!-- QR + HMAC -->
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/crypto-js.min.js"></script>
 
-  <!-- LIFF SDK -->
+  <!-- LIFF -->
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 
   <script>
-    /************* 你需要確認的設定 *************/
+    /************* 設定 *************/
     const LIFF_ID = "2008804666-dd6swDW3";
-
-    // ✅ 必須與 Apps Script 完全一致
-    const 密鑰SECRET = "fff3755952";
-
-    // ✅ 與 Apps Script 一致：QR 5 秒一格
-    const 每格秒數 = 5;
-    /*********************************************/
+    const 密鑰SECRET = "fff3755952"; // 必須與 Apps Script 完全一致
+    const 每格秒數 = 5;             // 5 秒一格
+    /*******************************/
 
     let countdownTimer = null;
     let refreshTimer = null;
@@ -116,21 +111,13 @@
       if(type==="ok") statusEl.className = "ok";
       if(type==="bad") statusEl.className = "bad";
     }
+    function isBound(){ return localStorage.getItem("boundEmpId"); }
+    function normalizeEmpId(v){ return (v || "").trim(); }
 
-    function isBound(){
-      return localStorage.getItem("boundEmpId");
-    }
-
-    function normalizeEmpId(v){
-      // 你可以依公司格式加規則，例如只允許 E001 之類
-      return (v || "").trim();
-    }
-
-    /************* 與 Apps Script 相同簽章 *************/
+    /************* HMAC（與 Apps Script 一致） *************/
     function 計算簽章(message){
       return CryptoJS.HmacSHA256(message, 密鑰SECRET).toString();
     }
-
     function 產生Token(profile){
       const empId = isBound();
       if(!empId) throw new Error("尚未綁定員工編號");
@@ -141,7 +128,7 @@
       return `${payload}&sig=${sig}`;
     }
 
-    /************* QR 顯示 *************/
+    /************* QR *************/
     function renderQR(text){
       try{
         if(!qrContainer) throw new Error("找不到 #qrcode 容器");
@@ -172,7 +159,6 @@
 
       const empId = isBound();
       boundEmpText.textContent = empId || "";
-
       qrHint.textContent = `QR 每 ${每格秒數} 秒更新一次（截圖無效）`;
 
       function refresh(){
@@ -193,23 +179,17 @@
       refreshTimer = setInterval(refresh, 每格秒數 * 1000);
     }
 
-    /************* 綁定流程 *************/
+    /************* 綁定 *************/
     bindBtn.addEventListener("click", () => {
       const v = normalizeEmpId(empIdEl.value);
-      if(!v){
-        bindHint.textContent = "請輸入員工編號";
-        return;
-      }
+      if(!v){ bindHint.textContent = "請輸入員工編號"; return; }
       localStorage.setItem("boundEmpId", v);
       bindHint.textContent = "綁定成功 ✅";
-
       if(currentProfile) startDynamicQR(currentProfile);
     });
 
     rebindBtn.addEventListener("click", () => {
-      // 讓使用者可修改員工編號
-      const current = isBound() || "";
-      empIdEl.value = current;
+      empIdEl.value = isBound() || "";
       hide(qrCard);
       show(bindCard);
       setStatus("請重新輸入員工編號後按綁定");
@@ -246,169 +226,6 @@
       }catch(e){
         console.error(e);
         setStatus("初始化失敗：請檢查 LIFF 設定 / Endpoint URL / 網路", "bad");
-      }
-    }
-
-    main();
-  </script>
-</body>
-</html>
-
-    const qrContainer = document.getElementById("qrcode");
-    const countdownEl = document.getElementById("countdown");
-    const qrHint = document.getElementById("qrHint");
-
-    const avatarEl = document.getElementById("avatar");
-    const displayNameEl = document.getElementById("displayName");
-    const userIdEl = document.getElementById("userId");
-
-    const empIdEl = document.getElementById("empId");
-    const bindBtn = document.getElementById("bindBtn");
-    const bindHint = document.getElementById("bindHint");
-
-    /************* 小工具 *************/
-    function show(el){ el.classList.remove("hidden"); }
-    function hide(el){ el.classList.add("hidden"); }
-    function setStatus(msg){ statusEl.textContent = msg; }
-
-    function fakeAction(name){
-      alert(`${name}：頁面已完成（下一步會接真正打卡功能）`);
-    }
-    function liffClose(){
-      if (window.liff) liff.closeWindow();
-    }
-
-    function isBound(){
-      return localStorage.getItem("boundEmpId")好
-    }
-
-    /************* 後端：向 Apps Script 拿 token *************/
-async function getToken(profile){
-  const empId = localStorage.getItem("boundEmpId") || "";
-  if(!empId) throw new Error("尚未綁定員工編號");
-
-  let res;
-  try{
-    res = await fetch(QR_TOKEN_URL, {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      redirect: "follow",
-      cache: "no-store",
-      body: JSON.stringify({
-        action: "issue",
-        lineUserId: profile.userId,
-        displayName: profile.displayName,
-        empId: empId
-      })
-    });
-  }catch(e){
-    throw new Error("load failed（跨網域/網路/權限）：請確認 Apps Script 已部署為任何人，或換網路再試");
-  }
-
-  const text = await res.text();
-
-  let json;
-  try{
-    json = JSON.parse(text);
-  }catch(e){
-    throw new Error("回傳非 JSON（疑似權限/登入頁）：" + text.slice(0,120));
-  }
-
-  if(!json.ok) throw new Error(json.error || "issue failed");
-  if(!json.token) throw new Error("未回傳 token");
-  return json.token;
-}
-
-    /************* QR 顯示 *************/
-    function renderQR(text) {
-  try {
-    if (!qrContainer) throw new Error("找不到 #qrcode 容器（HTML id 不存在）");
-    if (!window.QRCode) throw new Error("QRCode 套件未載入（qrcode.min.js 讀不到）");
-    qrContainer.innerHTML = "";
-    new QRCode(qrContainer, { text, width: 220, height: 220 });
-  } catch (e) {
-    console.error(e);
-    setStatus("無法產生 QR：" + (e.message || e.toString()));
-  }
-}
-
-
-    function startCountdown() {
-      let remain = QR_INTERVAL_SEC;
-      countdownEl.textContent = remain;
-
-      if (countdownTimer) clearInterval(countdownTimer);
-      countdownTimer = setInterval(() => {
-        remain--;
-        if (remain <= 0) remain = QR_INTERVAL_SEC;
-        countdownEl.textContent = remain;
-      }, 1000);
-    }
-
-    function startDynamicQR(profile) {
-      hide(bindCard);
-      show(qrCard);
-      qrHint.textContent = "QR 每 5 秒更新一次（截圖無效）";
-
-      async function refresh() {
-        try{
-          const token = await getToken(profile);   // ✅ 真正跟後端拿 token
-          renderQR(token);
-          setStatus("QR 已更新 ✅");
-        }catch(e){
-          console.error(e);
-          setStatus("QR 更新失敗：" + (e.message || e.toString()));
-        }
-      }
-
-      refresh();
-      startCountdown();
-
-      if (refreshTimer) clearInterval(refreshTimer);
-      refreshTimer = setInterval(refresh, QR_INTERVAL_SEC * 1000);
-    }
-
-    /************* 綁定 *************/
-    bindBtn.addEventListener("click", () => {
-      const v = (empIdEl.value || "").trim();
-      if(!v){ bindHint.textContent = "請輸入員工編號"; return; }
-      localStorage.setItem("boundEmpId", v);
-      bindHint.textContent = "綁定成功 ✅";
-
-      // ✅ 綁定後立刻顯示 QR（不用重開）
-      if (currentProfile) startDynamicQR(currentProfile);
-    });
-
-    /************* 主流程 *************/
-    async function main(){
-      try{
-        setStatus("初始化 LIFF…");
-        await liff.init({ liffId: LIFF_ID });
-
-        if(!liff.isLoggedIn()){
-          setStatus("導向 LINE 登入…");
-          liff.login();
-          return;
-        }
-
-        const profile = await liff.getProfile();
-        currentProfile = profile;
-
-        avatarEl.src = profile.pictureUrl || "";
-        displayNameEl.textContent = profile.displayName || "";
-        userIdEl.textContent = `LINE userId: ${profile.userId}`;
-        show(profileCard);
-
-        if(!isBound()){
-          setStatus("請先綁定員工編號");
-          show(bindCard);
-        }else{
-          setStatus(`已綁定員工編號：${isBound()}`);
-          startDynamicQR(profile);
-        }
-      }catch(e){
-        console.error(e);
-        setStatus("初始化失敗：請檢查 LIFF ID / 網址 / 程式是否有錯");
       }
     }
 
