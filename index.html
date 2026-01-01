@@ -116,7 +116,7 @@
     }
 
     /************* 後端：向 Apps Script 拿 token *************/
-    async function getToken(profile){
+async function getToken(profile){
   const empId = localStorage.getItem("boundEmpId") || "";
   if(!empId) throw new Error("尚未綁定員工編號");
 
@@ -135,18 +135,15 @@
       })
     });
   }catch(e){
-    // iPhone/LINE 內建瀏覽器常見訊息：load failed
     throw new Error("load failed（跨網域/網路/權限）：請確認 Apps Script 已部署為任何人，或換網路再試");
   }
 
-  // 先用 text 讀，避免 res.json() 因回 HTML 而直接炸掉
   const text = await res.text();
 
   let json;
   try{
     json = JSON.parse(text);
   }catch(e){
-    // 這裡如果看到 <!doctype html... 就是回到登入/權限頁
     throw new Error("回傳非 JSON（疑似權限/登入頁）：" + text.slice(0,120));
   }
 
@@ -154,12 +151,6 @@
   if(!json.token) throw new Error("未回傳 token");
   return json.token;
 }
-
-
-      const json = await res.json();
-      if(!json.ok) throw new Error(json.error || "issue failed");
-      return json.token;
-    }
 
     /************* QR 顯示 *************/
     function renderQR(text) {
