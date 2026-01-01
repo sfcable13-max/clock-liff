@@ -18,10 +18,11 @@
     .ok{color:#0a7a2f;font-weight:700;}
     .bad{color:#b00020;font-weight:700;}
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;white-space:pre-wrap;}
+    .tag{display:inline-block;padding:4px 8px;border-radius:999px;background:#f2f2f2;font-size:12px;margin-left:6px;}
   </style>
 </head>
 <body>
-  <h2>公司掃碼打卡</h2>
+  <h2>公司掃碼打卡 <span class="tag" id="deviceTag"></span></h2>
 
   <div class="card">
     <div class="muted">使用方式：先選擇「上班 / 下班」，再掃描員工手機上的動態 QR。</div>
@@ -34,6 +35,177 @@
 
   <div class="card">
     <video id="video" autoplay playsinline></video>
+    <div class="muted" style="margin-top:8px">若無法開相機，請確認瀏覽器已允許相機權限（建議用 Chrome/Safari）。</div>
+  </div>
+
+  <div class="card">
+    <div>結果：</div>
+    <div id="result" class="muted">尚未掃描</div>
+    <div id="debug" class="mono" style="margin-top:8px;display:none;"></div>
+  </div>
+
+  <!-- QR 掃描套件 -->
+  <script src="https://unpkg.com/jsqr/dist/jsQR.js"></script>
+
+  <script>
+    /************* 只要改這裡 *************/
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxYxL1CHI6p2uVtSvPrys8UNAjUZNRfB8uauq-G86eo36oxeARRg8VA4SSMzzdK7hAV/exec";
+    const DEVICE_NAME = "門口平板"; // ← 改成「產線平板/警衛室/門口iPad」都可以
+    /****************************************/
+
+    document.getElementById("deviceTag").textContent = DEVICE_NAME;
+
+    const video = document.getElementById("video");
+    const resultEl = document.getElementById("result");
+    const debugEl = document.getElementById("debug");
+    const modeText = document.getElementById("modeText");
+
+    let mode = "";           // 上班/下班
+    let scanning = false;
+    let lastToken = "";
+    let lastAt = 0;
+    let isSubmitting = false;
+
+    document.getElementById("btnIn").onclick = () => setMode("上班");
+    document.getElementById("btnOut").onclick = () => setMode("下班");
+
+    function setMode(m){
+      mode = m;
+      modeText.textContent = m;
+      setResultMuted("請掃描 QR…");
+    }
+
+    function setResultOk(text){
+      resultEl.textContent = text;
+      resultEl.className = "ok";
+    }
+    function setResultBad(text){
+      resultEl.textContent = text;
+      resultEl.className = "bad";
+    }
+    function setResultMuted(text){
+      resultEl.textContent = text;
+      resultEl.className = "muted";
+    }
+
+    async function startCamera(){
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+        audio: false
+      });
+      video.srcObject = stream;
+      await video.play();
+    }
+
+    function tick(){
+      if (!video.videoWidth) {
+        requestAnimationFrame(tick);
+        return;
+      }
+      if (!scanning) {
+        scanning = true;
+        scanLoop();
+      }
+    }
+
+    async function scanLoop(){
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+
+      while (true) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+        const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "dontInvert" });
+
+        if (code && code.data) {
+          const token = code.data.trim();
+          const now = Date.now();
+
+          // 防止同一個 token 連續送出（相機對準同一張 QR）
+          if (token === lastToken && (now - lastAt) < 1500) {
+            await sleep(200);
+            continue;
+          }
+          lastToken = token;
+          lastAt = now;
+
+          await submitClock(token);
+          await sleep(800);
+        } else {
+          await sleep(120);
+        }
+      }
+    }
+
+    async function submitClock(token){
+      if (!mode) {
+        setResultBad("請先選擇「上班 / 下班」");
+        return;
+      }
+      if (isSubmitting) return; // 避免同時送出
+      isSubmitting = true;
+
+      setResultMuted("送出中…");
+
+      try{
+        const res = await fetch(APPS_SCRIPT_URL, {
+          method: "POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify({
+            action: "clock",
+            type: mode,
+            token: token,
+            device: DEVICE_NAME
+          })
+        });
+
+        const text = await res.text();
+        let json = {};
+        try{ json = JSON.parse(text); }catch{ json = { ok:false, error:"回傳非 JSON：" + text.slice(0,120) }; }
+
+        if (json.ok) {
+          setResultOk(`${mode} 打卡成功 ✅（員工：${json.員工編號 || ""}）`);
+        } else {
+          const err = String(json.error || "未知錯誤");
+
+          // 常見錯誤友善化
+          if (err.includes("過期")) setResultBad("QR 已過期（超過 5 秒），請員工重新出示");
+          else if (err.includes("已使用")) setResultBad("此 QR 已使用過（截圖重掃會被擋）");
+          else if (err.includes("簽章錯誤")) setResultBad("簽章錯誤（token 非本系統產生）");
+          else if (err.includes("token 格式不完整")) setResultBad("QR 內容不完整（請重開員工端頁面）");
+          else setResultBad("失敗：" + err);
+        }
+
+        // 若你要看 debug，可打開這兩行
+        // debugEl.style.display = "block";
+        // debugEl.textContent = JSON.stringify(json, null, 2);
+
+      }catch(e){
+        console.error(e);
+        setResultBad("送出失敗：請檢查網路或 /exec 網址是否正確");
+      }finally{
+        isSubmitting = false;
+      }
+    }
+
+    function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+    (async function(){
+      try{
+        await startCamera();
+        tick();
+        setResultMuted("請先選擇上班/下班，再掃描 QR…");
+      }catch(e){
+        console.error(e);
+        setResultBad("無法開啟相機：請允許相機權限或改用 Chrome/Safari");
+      }
+    })();
+  </script>
+</body>
+</html>
     <div class="muted" style="margin-top:8px">若無法開相機，請確認瀏覽器已允許相機權限。</div>
   </div>
 
