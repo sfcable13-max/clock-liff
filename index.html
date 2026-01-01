@@ -8,14 +8,16 @@
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, "Noto Sans TC", sans-serif; margin: 20px; }
     .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
     .row { display:flex; align-items:center; gap:12px; }
-    img { width: 48px; height: 48px; border-radius: 50%; }
+    img { width: 48px; height: 48px; border-radius: 50%; background:#f2f2f2; }
     button { width: 100%; padding: 14px; margin: 8px 0; border: 0; border-radius: 10px; font-size: 16px; }
     .primary { background:#111; color:#fff; }
     .secondary { background:#f2f2f2; color:#111; }
     .danger { background:#ffe9e9; color:#a40000; }
-    .muted { color:#666; font-size: 13px; }
+    .muted { color:#666; font-size: 13px; line-height:1.5; }
     .hidden { display:none; }
-    input { width: 100%; padding: 12px; border-radius: 10px; border:1px solid #ccc; font-size: 16px; }
+    input { width: 100%; padding: 12px; border-radius: 10px; border:1px solid #ccc; font-size: 16px; box-sizing:border-box; }
+    .ok { color:#0a7a2f; font-weight:700; }
+    .bad{ color:#b00020; font-weight:700; }
   </style>
 </head>
 <body>
@@ -54,38 +56,203 @@
     <div class="muted" style="margin-top:10px;">
       重新更新倒數：<span id="countdown">5</span> 秒
     </div>
+
+    <div class="muted" style="margin-top:8px;">
+      已綁定員工編號：<b id="boundEmpText"></b>
+    </div>
+
+    <button class="secondary" id="rebindBtn">更改員工編號</button>
   </div>
 
-  <!-- 你原本的 actionsCard 保留，但不再顯示 -->
-  <div class="card hidden" id="actionsCard">
-    <div><b>功能</b></div>
-    <button class="primary" onclick="fakeAction('上班')">上班打卡</button>
-    <button class="primary" onclick="fakeAction('下班')">下班打卡</button>
-    <button class="secondary" onclick="fakeAction('外勤打卡')">外勤打卡</button>
-    <button class="secondary" onclick="fakeAction('請假申請')">請假申請</button>
-    <button class="danger" onclick="liffClose()">關閉</button>
-    <p class="muted">＊目前為畫面測試版，尚未連接實際打卡資料。</p>
-  </div>
-
+  <!-- QR 產生器 + HMAC（用於與 Apps Script 相同簽章） -->
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <script>
-    /************* 基本設定 *************/
-    const LIFF_ID = "2008804666-dd6swDW3";
-    const QR_INTERVAL_SEC = 5;
+  <script src="https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/crypto-js.min.js"></script>
 
-    // ✅ 你的 Apps Script /exec 網址（已填）
-    const QR_TOKEN_URL = "https://script.google.com/macros/s/AKfycbxYxL1CHI6p2uVtSvPrys8UNAjUZNRfB8uauq-G86eo36oxeARRg8VA4SSMzzdK7hAV/exec";
+  <!-- LIFF SDK -->
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
+  <script>
+    /************* 你需要確認的設定 *************/
+    const LIFF_ID = "2008804666-dd6swDW3";
+
+    // ✅ 必須與 Apps Script 完全一致
+    const 密鑰SECRET = "fff3755952";
+
+    // ✅ 與 Apps Script 一致：QR 5 秒一格
+    const 每格秒數 = 5;
+    /*********************************************/
 
     let countdownTimer = null;
     let refreshTimer = null;
-    let currentProfile = null; // ✅ 存 profile，綁定後可直接顯示 QR
+    let currentProfile = null;
 
-    /************* 取得 DOM *************/
+    /************* DOM *************/
     const statusEl = document.getElementById("status");
     const profileCard = document.getElementById("profileCard");
     const bindCard = document.getElementById("bindCard");
     const qrCard = document.getElementById("qrCard");
+
+    const qrContainer = document.getElementById("qrcode");
+    const countdownEl = document.getElementById("countdown");
+    const qrHint = document.getElementById("qrHint");
+
+    const avatarEl = document.getElementById("avatar");
+    const displayNameEl = document.getElementById("displayName");
+    const userIdEl = document.getElementById("userId");
+
+    const empIdEl = document.getElementById("empId");
+    const bindBtn = document.getElementById("bindBtn");
+    const bindHint = document.getElementById("bindHint");
+
+    const boundEmpText = document.getElementById("boundEmpText");
+    const rebindBtn = document.getElementById("rebindBtn");
+
+    /************* 小工具 *************/
+    function show(el){ el.classList.remove("hidden"); }
+    function hide(el){ el.classList.add("hidden"); }
+    function setStatus(msg, type=""){
+      statusEl.textContent = msg;
+      statusEl.className = "muted";
+      if(type==="ok") statusEl.className = "ok";
+      if(type==="bad") statusEl.className = "bad";
+    }
+
+    function isBound(){
+      return localStorage.getItem("boundEmpId");
+    }
+
+    function normalizeEmpId(v){
+      // 你可以依公司格式加規則，例如只允許 E001 之類
+      return (v || "").trim();
+    }
+
+    /************* 與 Apps Script 相同簽章 *************/
+    function 計算簽章(message){
+      return CryptoJS.HmacSHA256(message, 密鑰SECRET).toString();
+    }
+
+    function 產生Token(profile){
+      const empId = isBound();
+      if(!empId) throw new Error("尚未綁定員工編號");
+
+      const ts = Math.floor(Date.now() / 1000 / 每格秒數);
+      const payload = `uid=${encodeURIComponent(profile.userId)}&emp=${encodeURIComponent(empId)}&ts=${ts}`;
+      const sig = 計算簽章(payload);
+      return `${payload}&sig=${sig}`;
+    }
+
+    /************* QR 顯示 *************/
+    function renderQR(text){
+      try{
+        if(!qrContainer) throw new Error("找不到 #qrcode 容器");
+        if(!window.QRCode) throw new Error("QRCode 套件未載入");
+        qrContainer.innerHTML = "";
+        new QRCode(qrContainer, { text, width: 220, height: 220 });
+      }catch(e){
+        console.error(e);
+        setStatus("無法產生 QR：" + (e.message || e.toString()), "bad");
+      }
+    }
+
+    function startCountdown(){
+      let remain = 每格秒數;
+      countdownEl.textContent = remain;
+
+      if(countdownTimer) clearInterval(countdownTimer);
+      countdownTimer = setInterval(() => {
+        remain--;
+        if(remain <= 0) remain = 每格秒數;
+        countdownEl.textContent = remain;
+      }, 1000);
+    }
+
+    function startDynamicQR(profile){
+      hide(bindCard);
+      show(qrCard);
+
+      const empId = isBound();
+      boundEmpText.textContent = empId || "";
+
+      qrHint.textContent = `QR 每 ${每格秒數} 秒更新一次（截圖無效）`;
+
+      function refresh(){
+        try{
+          const token = 產生Token(profile);
+          renderQR(token);
+          setStatus("QR 已更新 ✅", "ok");
+        }catch(e){
+          console.error(e);
+          setStatus("QR 產生失敗：" + (e.message || e.toString()), "bad");
+        }
+      }
+
+      refresh();
+      startCountdown();
+
+      if(refreshTimer) clearInterval(refreshTimer);
+      refreshTimer = setInterval(refresh, 每格秒數 * 1000);
+    }
+
+    /************* 綁定流程 *************/
+    bindBtn.addEventListener("click", () => {
+      const v = normalizeEmpId(empIdEl.value);
+      if(!v){
+        bindHint.textContent = "請輸入員工編號";
+        return;
+      }
+      localStorage.setItem("boundEmpId", v);
+      bindHint.textContent = "綁定成功 ✅";
+
+      if(currentProfile) startDynamicQR(currentProfile);
+    });
+
+    rebindBtn.addEventListener("click", () => {
+      // 讓使用者可修改員工編號
+      const current = isBound() || "";
+      empIdEl.value = current;
+      hide(qrCard);
+      show(bindCard);
+      setStatus("請重新輸入員工編號後按綁定");
+    });
+
+    /************* 主流程 *************/
+    async function main(){
+      try{
+        setStatus("初始化 LIFF…");
+        await liff.init({ liffId: LIFF_ID });
+
+        if(!liff.isLoggedIn()){
+          setStatus("導向 LINE 登入…");
+          liff.login();
+          return;
+        }
+
+        setStatus("讀取個人資料…");
+        const profile = await liff.getProfile();
+        currentProfile = profile;
+
+        avatarEl.src = profile.pictureUrl || "";
+        displayNameEl.textContent = profile.displayName || "";
+        userIdEl.textContent = `LINE userId: ${profile.userId}`;
+        show(profileCard);
+
+        if(!isBound()){
+          setStatus("請先綁定員工編號");
+          show(bindCard);
+        }else{
+          setStatus(`已綁定員工編號：${isBound()}`);
+          startDynamicQR(profile);
+        }
+      }catch(e){
+        console.error(e);
+        setStatus("初始化失敗：請檢查 LIFF 設定 / Endpoint URL / 網路", "bad");
+      }
+    }
+
+    main();
+  </script>
+</body>
+</html>
 
     const qrContainer = document.getElementById("qrcode");
     const countdownEl = document.getElementById("countdown");
@@ -112,7 +279,7 @@
     }
 
     function isBound(){
-      return localStorage.getItem("boundEmpId");
+      return localStorage.getItem("boundEmpId")好
     }
 
     /************* 後端：向 Apps Script 拿 token *************/
