@@ -68,6 +68,28 @@
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <script>
     const LIFF_ID = "2008804666-dd6swDW3";
+    // Apps Script Web App（發 QR token 用）
+const QR_TOKEN_URL = "貼上你剛剛複製的 /exec 網址";
+
+async function getToken(profile){
+  const empId = localStorage.getItem("boundEmpId") || localStorage.getItem("empId") || "";
+  if(!empId) throw new Error("尚未綁定員工編號");
+
+  const res = await fetch(QR_TOKEN_URL, {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      action: "issue",
+      lineUserId: profile.userId,
+      displayName: profile.displayName,
+      empId: empId
+    })
+  });
+
+  const json = await res.json();
+  if(!json.ok) throw new Error(json.error || "issue failed");
+  return json.token;
+}
 
     const statusEl = document.getElementById("status");
     const profileCard = document.getElementById("profileCard");
@@ -81,6 +103,8 @@ const qrHint = document.getElementById("qrHint");
 const QR_INTERVAL_SEC = 5;
 let countdownTimer = null;
 let refreshTimer = null;
+const QR_TOKEN_URL = "https://script.google.com/macros/s/AKfycbxkC40Hc4qew80WMvyI-rfADGVzvu77t_jS3_mC1sQJTTqCHNXBPbMFuwytqvNv6GB5/exec";
+
 
 function renderQR(text) {
   qrContainer.innerHTML = "";
